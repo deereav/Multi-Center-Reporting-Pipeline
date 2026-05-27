@@ -1,0 +1,9 @@
+location,month,service_type,participants,completed
+East,2024-01,Job Training,33,28
+East,2024-01,ESL,41,35
+East,2024-02,Job Training,37,31
+East,2024-02,ESL,44,38
+East,2024-03,Job Training,,29
+East,2024-03,ESL,48,42
+East,2024-04,Job Training,35,30
+East,2024-04,ESL,52,46
