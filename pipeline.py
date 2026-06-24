@@ -1,27 +1,53 @@
+"""Multi-center reporting pipeline.
+
+Normalizes inconsistent monthly data from three regional centers into a
+single schema, then generates a standardized Excel report with two
+summary sheets.
+"""
+
+from pathlib import Path
 import pandas as pd
 import duckdb
-east = pd.read_csv("data/east.csv")
-west = pd.read_csv("data/west.csv")
-north = pd.read_csv("data/north.csv")
-#Clean east.csv - Use average ratio for calculationg missing data
+
+DATA = Path(__file__).resolve().parent / "data"
+
+# Load the three regional files
+east  = pd.read_csv(DATA / "east.csv")
+west  = pd.read_csv(DATA / "west.csv")
+north = pd.read_csv(DATA / "north.csv")
+
+# East: estimate missing participants using the average completion ratio
 east["cpratio"] = east["completed"] / east["participants"]
-cpave = (east["cpratio"]).mean()
-east.loc[east["participants"].isna(), "participants"] = round(east["completed"] / cpave)
-#Clean west.csv - Convert the date to the same format as other datasets
-west["month"] = pd.to_datetime(west["period"], format="%b-%Y").dt.strftime("%Y-%m")
-#Drop extra columns
+cpave = east["cpratio"].mean()
+missing = east["participants"].isna()
+east.loc[missing, "participants"] = (east.loc[missing, "completed"] / cpave).round()
+east["participants"] = east["participants"].astype("Int64")  # nullable int
 east = east.drop(columns=["cpratio"])
-west = west.drop(columns= ["period"])
-#Rename columns so there is name consistency across all datasets
-east = east.rename(columns={"location": "center", "participants": "enrollments", "service_type": "program", "completed":"completions"})
-west = west.rename(columns={"site": "center", "enrolled": "enrollments", "program_name": "program", "completed_count": "completions"})
-#Reorder columns so that there is column order consistency across all datasets
-west = west[["center", "month", "program", "enrollments", "completions"]]
-north = north[["center", "month", "program", "enrollments", "completions"]]
-#Combine the datasets in one file
+
+# West: convert "Sep-2025" -> "2025-09" so all sources share one date format
+west["month"] = pd.to_datetime(west["period"], format="%b-%Y").dt.strftime("%Y-%m")
+west = west.drop(columns=["period"])
+
+# Rename each source to the shared schema
+east = east.rename(columns={
+    "location": "center", "service_type": "program",
+    "participants": "enrollments", "completed": "completions",
+})
+west = west.rename(columns={
+    "site": "center", "program_name": "program",
+    "enrolled": "enrollments", "completed_count": "completions",
+})
+
+# Enforce shared column order
+SCHEMA = ["center", "month", "program", "enrollments", "completions"]
+east, west, north = east[SCHEMA], west[SCHEMA], north[SCHEMA]
+
+# Combine and verify the schema is what we expect before reporting
 combined = pd.concat([east, west, north], ignore_index=True)
-#Summarize the data using SQL and put the results back into pandas
-#SQL Output to Excel
+assert set(combined.columns) == set(SCHEMA), \
+    f"Schema mismatch: {set(combined.columns) ^ set(SCHEMA)}"
+
+# Summary reports via SQL against the in-memory DataFrame
 summary_by_center = duckdb.sql("""
     SELECT center,
            SUM(enrollments) AS total_enrollments,
@@ -39,7 +65,10 @@ monthly_trend = duckdb.sql("""
     GROUP BY month
     ORDER BY month
 """).df()
-#Write the summary reports out to Excel
-with pd.ExcelWriter("report.xlsx") as writer:
+
+# Write both summaries to one Excel workbook
+with pd.ExcelWriter(DATA / "report.xlsx") as writer:
     summary_by_center.to_excel(writer, sheet_name="Summary by Center", index=False)
     monthly_trend.to_excel(writer, sheet_name="Monthly Trend", index=False)
+
+print(f"Wrote {DATA / 'report.xlsx'}")
