@@ -1,6 +1,6 @@
 # Multi-Center Reporting Pipeline
 
-A small Python pipeline that takes inconsistent monthly data from three
+A Python pipeline that takes inconsistent monthly data from three
 regional centers, normalizes it into a single schema, and produces a
 standardized Excel report.
 
